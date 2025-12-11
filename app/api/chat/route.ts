@@ -40,15 +40,27 @@ const CHAT_RESPONSE_SCHEMA: Schema = {
 };
 
 export async function POST(request: NextRequest) {
+  console.log('🚀 Chat API called');
+  
   try {
     const { history, message } = await request.json();
 
     const apiKey = process.env.GEMINI_API_KEY;
     const baseUrl = process.env.GEMINI_BASE_URL || 'https://generativelanguage.googleapis.com';
 
+    // 详细的环境检查
+    console.log('📋 Environment:', {
+      hasApiKey: !!apiKey,
+      apiKeyLength: apiKey?.length || 0,
+      baseUrl,
+      isVercel: !!process.env.VERCEL,
+      vercelEnv: process.env.VERCEL_ENV,
+    });
+
     if (!apiKey) {
+      console.error('❌ ERROR: GEMINI_API_KEY not found');
       return NextResponse.json(
-        { error: 'API Key not configured' },
+        { error: 'API Key not configured. Check Vercel environment variables.' },
         { status: 500 }
       );
     }
@@ -97,12 +109,16 @@ export async function POST(request: NextRequest) {
 
     if (!response.ok) {
       const errorText = await response.text();
-      console.error('❌ API Error Response:', errorText);
-      throw new Error(`API Error: ${response.status} ${response.statusText}`);
+      console.error('❌ API Error Response:', {
+        status: response.status,
+        statusText: response.statusText,
+        error: errorText.substring(0, 500)
+      });
+      throw new Error(`API Error: ${response.status} - ${errorText.substring(0, 100)}`);
     }
 
     const data = await response.json();
-    console.log('✅ Received response');
+    console.log('✅ Received response from API');
 
     // 解析响应
     const text = data.candidates?.[0]?.content?.parts?.[0]?.text;
@@ -127,18 +143,22 @@ export async function POST(request: NextRequest) {
     });
 
   } catch (error) {
-    console.error("❌ Error in chat:", error);
+    console.error("❌ FATAL ERROR in chat:", error);
     
     if (error instanceof Error) {
       console.error('Error details:', {
         name: error.name,
-        message: error.message
+        message: error.message,
+        stack: error.stack?.split('\n').slice(0, 3).join('\n')
       });
     }
     
     const errorMessage = error instanceof Error ? error.message : String(error);
     return NextResponse.json(
-      { error: `系统错误：${errorMessage}` },
+      { 
+        error: `系统错误：${errorMessage}`,
+        hint: 'Check Vercel function logs for details'
+      },
       { status: 500 }
     );
   }
