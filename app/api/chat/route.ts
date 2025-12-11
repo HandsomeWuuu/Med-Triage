@@ -118,7 +118,7 @@ export async function POST(request: NextRequest) {
     }
 
     const data = await response.json();
-    console.log('✅ Received response from API');
+    console.log('✅ Received response');
 
     // 解析响应
     const text = data.candidates?.[0]?.content?.parts?.[0]?.text;
@@ -126,8 +126,45 @@ export async function POST(request: NextRequest) {
       throw new Error('No text in response');
     }
 
-    const parsed = JSON.parse(text);
-    console.log('📊 Parsed response:', JSON.stringify(parsed, null, 2));
+    console.log('📄 Raw response text:', text.substring(0, 300) + '...');
+
+    // 清理和解析 JSON
+    let parsed;
+    try {
+      // 尝试清理 JSON 字符串
+      let cleanedText = text.trim();
+      
+      // 如果文本被 markdown 代码块包裹，移除它们
+      if (cleanedText.startsWith('```json')) {
+        cleanedText = cleanedText.replace(/^```json\s*/i, '').replace(/\s*```$/, '');
+      } else if (cleanedText.startsWith('```')) {
+        cleanedText = cleanedText.replace(/^```\s*/, '').replace(/\s*```$/, '');
+      }
+      
+      // 尝试修复常见的 JSON 问题
+      cleanedText = cleanedText
+        .replace(/[\u0000-\u001F\u007F-\u009F]/g, '') // 移除控制字符
+        .replace(/\n/g, ' ') // 替换换行符
+        .replace(/\r/g, '') // 移除回车符
+        .trim();
+      
+      // 确保字符串完整闭合
+      if (cleanedText.endsWith('"')) {
+        // 检查是否缺少闭合大括号
+        const openBraces = (cleanedText.match(/{/g) || []).length;
+        const closeBraces = (cleanedText.match(/}/g) || []).length;
+        if (openBraces > closeBraces) {
+          cleanedText += '}'.repeat(openBraces - closeBraces);
+        }
+      }
+      
+      parsed = JSON.parse(cleanedText);
+      console.log('📊 Parsed response:', JSON.stringify(parsed, null, 2));
+    } catch (parseError) {
+      console.error('❌ JSON Parse Error:', parseError);
+      console.error('Failed to parse text (first 500 chars):', text.substring(0, 500));
+      throw new Error(`Invalid JSON response from AI: ${parseError instanceof Error ? parseError.message : 'Unknown error'}`);
+    }
     
     // 处理 options：如果是对象数组，提取文本字段
     let options = parsed.options || [];
@@ -143,7 +180,7 @@ export async function POST(request: NextRequest) {
     });
 
   } catch (error) {
-    console.error("❌ FATAL ERROR in chat:", error);
+    console.error("❌ Error in chat:", error);
     
     if (error instanceof Error) {
       console.error('Error details:', {
