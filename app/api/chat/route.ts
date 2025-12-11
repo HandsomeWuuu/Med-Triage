@@ -8,12 +8,20 @@ You are an expert Medical Triage Nurse AI, communicating in Simplified Chinese (
 Your goal is to interview the patient to understand their "Chief Complaint" (主诉).
 
 CRITICAL RULES:
-1. ASK FEW QUESTIONS: Patients are impatient. Ask only 3-5 high-impact questions total to determine severity and key symptoms.
-2. BE CONCISE: Questions must be short (under 20 words).
-3. GENERATE OPTIONS: You MUST provide a list of 4-6 predefined short options (answers) in Chinese.
-   - If inquiring about specific pain/location, use Single Choice.
-   - If inquiring about associated symptoms (e.g., "Do you also have...?"), use Multiple Choice.
+1. ASK ONE QUESTION AT A TIME: Ask only ONE question per response. Do NOT return multiple questions.
+2. ASK FEW QUESTIONS TOTAL: Plan to ask only 3-5 questions total throughout the conversation.
+3. BE CONCISE: Questions must be short (under 20 words).
+4. GENERATE OPTIONS: You MUST provide a list of 4-6 predefined short options (answers) in Chinese.
+   - If inquiring about specific pain/location, use Single Choice (allowMultiple: false).
+   - If inquiring about associated symptoms (e.g., "Do you also have...?"), use Multiple Choice (allowMultiple: true).
    - Always include "其他" (Other) or "无" (None).
+
+OUTPUT FORMAT (JSON):
+{
+  "question": "你的一个问题",
+  "options": ["选项1", "选项2", "选项3", "选项4"],
+  "allowMultiple": false
+}
 
 Tone: Professional, empathetic, efficient.
 `;
@@ -184,8 +192,17 @@ export async function POST(request: NextRequest) {
     let options: string[] = [];
     let allowMultiple = false;
     
+    // 检查是否是 questions 数组格式（返回了多个问题）
+    if (parsed.questions && Array.isArray(parsed.questions) && parsed.questions.length > 0) {
+      console.warn('⚠️ Received questions array format, using first question');
+      const firstQuestion = parsed.questions[0];
+      questionText = firstQuestion.question || '请描述您的症状';
+      options = firstQuestion.options || [];
+      allowMultiple = firstQuestion.type === 'Multiple Choice';
+      console.log(`📝 Extracted first question from ${parsed.questions.length} questions`);
+    }
     // 检查是否是错误的 dialogue 格式
-    if (parsed.dialogue && Array.isArray(parsed.dialogue)) {
+    else if (parsed.dialogue && Array.isArray(parsed.dialogue)) {
       console.warn('⚠️ Received dialogue format instead of expected format');
       // 尝试从 dialogue 中提取问题
       const aiMessage = parsed.dialogue.find((d: any) => d.speaker === 'AI' || d.role === 'assistant');
@@ -193,8 +210,9 @@ export async function POST(request: NextRequest) {
       // 使用默认选项
       options = ['继续', '重新开始'];
       allowMultiple = false;
-    } else if (parsed.question) {
-      // 正确的格式
+    } 
+    // 正确的单个问题格式
+    else if (parsed.question) {
       questionText = parsed.question;
       options = parsed.options || [];
       
@@ -204,9 +222,11 @@ export async function POST(request: NextRequest) {
       }
       
       allowMultiple = parsed.allowMultiple || parsed.question_type === 'multiple_choice' || false;
-    } else {
-      // 未知格式
+    } 
+    // 未知格式
+    else {
       console.error('❌ Unknown response format:', Object.keys(parsed));
+      console.error('Full parsed object:', JSON.stringify(parsed, null, 2));
       throw new Error('Unexpected response format from AI');
     }
     
