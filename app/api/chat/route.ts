@@ -126,7 +126,12 @@ export async function POST(request: NextRequest) {
       throw new Error('No text in response');
     }
 
-    console.log('📄 Raw response text:', text.substring(0, 300) + '...');
+    // 记录完整的原始响应（用于调试）
+    console.log('📄 Raw response text (length:', text.length, ')');
+    console.log('First 500 chars:', text.substring(0, 500));
+    if (text.length > 500) {
+      console.log('Last 200 chars:', text.substring(text.length - 200));
+    }
 
     // 清理和解析 JSON
     let parsed;
@@ -141,42 +146,76 @@ export async function POST(request: NextRequest) {
         cleanedText = cleanedText.replace(/^```\s*/, '').replace(/\s*```$/, '');
       }
       
-      // 尝试修复常见的 JSON 问题
+      // 不要替换换行符，因为 JSON 字符串值内部可能包含换行符
+      // 只移除真正的控制字符（保留 \n, \r, \t）
       cleanedText = cleanedText
-        .replace(/[\u0000-\u001F\u007F-\u009F]/g, '') // 移除控制字符
-        .replace(/\n/g, ' ') // 替换换行符
-        .replace(/\r/g, '') // 移除回车符
+        .replace(/[\u0000-\u0008\u000B-\u000C\u000E-\u001F\u007F-\u009F]/g, '')
         .trim();
       
       // 确保字符串完整闭合
-      if (cleanedText.endsWith('"')) {
-        // 检查是否缺少闭合大括号
-        const openBraces = (cleanedText.match(/{/g) || []).length;
-        const closeBraces = (cleanedText.match(/}/g) || []).length;
-        if (openBraces > closeBraces) {
-          cleanedText += '}'.repeat(openBraces - closeBraces);
-        }
+      const openBraces = (cleanedText.match(/{/g) || []).length;
+      const closeBraces = (cleanedText.match(/}/g) || []).length;
+      const openBrackets = (cleanedText.match(/\[/g) || []).length;
+      const closeBrackets = (cleanedText.match(/\]/g) || []).length;
+      
+      if (openBraces > closeBraces) {
+        console.log('🔧 Adding missing closing braces:', openBraces - closeBraces);
+        cleanedText += '}'.repeat(openBraces - closeBraces);
+      }
+      if (openBrackets > closeBrackets) {
+        console.log('🔧 Adding missing closing brackets:', openBrackets - closeBrackets);
+        cleanedText += ']'.repeat(openBrackets - closeBrackets);
       }
       
+      console.log('🧹 Cleaned text (first 500):', cleanedText.substring(0, 500));
+      
       parsed = JSON.parse(cleanedText);
-      console.log('📊 Parsed response:', JSON.stringify(parsed, null, 2));
+      console.log('📊 Parsed response structure:', Object.keys(parsed));
+      console.log('📊 Full parsed:', JSON.stringify(parsed, null, 2).substring(0, 1000));
     } catch (parseError) {
       console.error('❌ JSON Parse Error:', parseError);
-      console.error('Failed to parse text (first 500 chars):', text.substring(0, 500));
+      console.error('Failed text (first 800 chars):', text.substring(0, 800));
+      console.error('Failed text (last 200 chars):', text.substring(text.length - 200));
       throw new Error(`Invalid JSON response from AI: ${parseError instanceof Error ? parseError.message : 'Unknown error'}`);
     }
     
-    // 处理 options：如果是对象数组，提取文本字段
-    let options = parsed.options || [];
-    if (options.length > 0 && typeof options[0] === 'object') {
-      // 对象格式：{value, text} 或 {key, value}
-      options = options.map((opt: any) => opt.text || opt.value || String(opt));
+    // 处理不同的响应格式
+    let questionText = '';
+    let options: string[] = [];
+    let allowMultiple = false;
+    
+    // 检查是否是错误的 dialogue 格式
+    if (parsed.dialogue && Array.isArray(parsed.dialogue)) {
+      console.warn('⚠️ Received dialogue format instead of expected format');
+      // 尝试从 dialogue 中提取问题
+      const aiMessage = parsed.dialogue.find((d: any) => d.speaker === 'AI' || d.role === 'assistant');
+      questionText = aiMessage?.text || '请描述您的症状';
+      // 使用默认选项
+      options = ['继续', '重新开始'];
+      allowMultiple = false;
+    } else if (parsed.question) {
+      // 正确的格式
+      questionText = parsed.question;
+      options = parsed.options || [];
+      
+      // 处理 options：如果是对象数组，提取文本字段
+      if (options.length > 0 && typeof options[0] === 'object') {
+        options = options.map((opt: any) => opt.text || opt.value || String(opt));
+      }
+      
+      allowMultiple = parsed.allowMultiple || parsed.question_type === 'multiple_choice' || false;
+    } else {
+      // 未知格式
+      console.error('❌ Unknown response format:', Object.keys(parsed));
+      throw new Error('Unexpected response format from AI');
     }
     
+    console.log('✅ Final response:', { questionText, optionsCount: options.length, allowMultiple });
+    
     return NextResponse.json({
-      text: parsed.question,
+      text: questionText,
       options: options,
-      allowMultiple: parsed.allowMultiple || parsed.question_type === 'multiple_choice' || false
+      allowMultiple: allowMultiple
     });
 
   } catch (error) {
