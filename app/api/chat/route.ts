@@ -109,7 +109,7 @@ export async function POST(request: NextRequest) {
           temperature: 0.5,
           topK: 40,
           topP: 0.95,
-          maxOutputTokens: 1024,
+          maxOutputTokens: 8192,  // 增加 token 限制，避免截断
           responseMimeType: 'application/json'
         }
       })
@@ -160,19 +160,47 @@ export async function POST(request: NextRequest) {
         .replace(/[\u0000-\u0008\u000B-\u000C\u000E-\u001F\u007F-\u009F]/g, '')
         .trim();
       
-      // 确保字符串完整闭合
+      // 智能修复不完整的 JSON
       const openBraces = (cleanedText.match(/{/g) || []).length;
       const closeBraces = (cleanedText.match(/}/g) || []).length;
       const openBrackets = (cleanedText.match(/\[/g) || []).length;
       const closeBrackets = (cleanedText.match(/\]/g) || []).length;
       
-      if (openBraces > closeBraces) {
-        console.log('🔧 Adding missing closing braces:', openBraces - closeBraces);
-        cleanedText += '}'.repeat(openBraces - closeBraces);
+      // 检查是否有未闭合的字符串
+      const lastChar = cleanedText[cleanedText.length - 1];
+      const hasUnterminatedString = !cleanedText.endsWith('"') && 
+                                     !cleanedText.endsWith(']') && 
+                                     !cleanedText.endsWith('}') &&
+                                     !cleanedText.endsWith(',');
+      
+      if (hasUnterminatedString) {
+        console.log('🔧 Fixing unterminated string');
+        // 添加引号闭合字符串
+        cleanedText += '"';
+        
+        // 检查上下文，决定是否需要添加逗号或结束符
+        if (cleanedText.includes('"options":')) {
+          // 在 options 数组中，添加数组结束符
+          cleanedText += ']';
+        }
       }
+      
       if (openBrackets > closeBrackets) {
         console.log('🔧 Adding missing closing brackets:', openBrackets - closeBrackets);
         cleanedText += ']'.repeat(openBrackets - closeBrackets);
+      }
+      
+      // 如果 options 数组已闭合但缺少 allowMultiple 字段
+      if (cleanedText.includes('"options"') && !cleanedText.includes('"allowMultiple"')) {
+        console.log('🔧 Adding missing allowMultiple field');
+        // 移除最后的 }（如果有）
+        if (cleanedText.endsWith('}')) {
+          cleanedText = cleanedText.slice(0, -1);
+        }
+        cleanedText += ', "allowMultiple": false}';
+      } else if (openBraces > closeBraces) {
+        console.log('🔧 Adding missing closing braces:', openBraces - closeBraces);
+        cleanedText += '}'.repeat(openBraces - closeBraces);
       }
       
       console.log('🧹 Cleaned text (first 500):', cleanedText.substring(0, 500));
@@ -184,7 +212,37 @@ export async function POST(request: NextRequest) {
       console.error('❌ JSON Parse Error:', parseError);
       console.error('Failed text (first 800 chars):', text.substring(0, 800));
       console.error('Failed text (last 200 chars):', text.substring(text.length - 200));
-      throw new Error(`Invalid JSON response from AI: ${parseError instanceof Error ? parseError.message : 'Unknown error'}`);
+      
+      // 尝试从不完整的 JSON 中提取问题
+      console.log('🔧 Attempting emergency extraction...');
+      const questionMatch = text.match(/"question"\s*:\s*"([^"]+)"/);
+      const optionsMatch = text.match(/"options"\s*:\s*\[(.*)/s);
+      
+      if (questionMatch) {
+        console.log('✅ Emergency extraction: found question');
+        const emergencyQuestion = questionMatch[1];
+        let emergencyOptions = ['是', '否', '不确定'];
+        
+        if (optionsMatch) {
+          // 尝试提取选项
+          const optionsStr = optionsMatch[1];
+          const extractedOptions = optionsStr.match(/"([^"]+)"/g);
+          if (extractedOptions && extractedOptions.length > 0) {
+            emergencyOptions = extractedOptions.map((opt: string) => opt.replace(/"/g, ''));
+            console.log('✅ Extracted options:', emergencyOptions);
+          }
+        }
+        
+        // 返回紧急修复的结果
+        parsed = {
+          question: emergencyQuestion,
+          options: emergencyOptions,
+          allowMultiple: false
+        };
+        console.log('🚑 Using emergency parsed result:', parsed);
+      } else {
+        throw new Error(`Invalid JSON response from AI: ${parseError instanceof Error ? parseError.message : 'Unknown error'}`);
+      }
     }
     
     // 处理不同的响应格式
