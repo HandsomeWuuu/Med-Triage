@@ -347,6 +347,11 @@ const App: React.FC = () => {
                          </button>
                        </div>
                      )}
+                     
+                     {/* 提示用户也可以打字描述 */}
+                     <p className="text-[10px] text-slate-400 mt-3 pl-1 italic">
+                       💡 也可以在下方输入框中打字描述您的具体情况
+                     </p>
                   </div>
                 )}
               </div>
@@ -374,7 +379,7 @@ const App: React.FC = () => {
               value={input}
               onChange={(e) => setInput(e.target.value)}
               onKeyDown={handleKeyDown}
-              placeholder="输入您的回答或从上方选择..."
+              placeholder="可选择上方选项，或在此输入详细描述..."
               className="w-full pl-4 pr-12 py-3 bg-slate-100 border-none rounded-xl focus:ring-2 focus:ring-blue-500 resize-none text-sm text-slate-800 placeholder-slate-400"
               rows={2}
             />
