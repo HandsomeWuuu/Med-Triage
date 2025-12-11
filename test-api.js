@@ -1,7 +1,7 @@
 // 测试第三方 Gemini API 连接
 // 运行: node test-api.js
 
-const API_KEY = 'sk-bdpN20sgmgTUzx455kBflsKqZTdBfRyvDFgQo8QlLCgeCr3o';
+const API_KEY = process.env.GEMINI_API_KEY || 'your-api-key-here';
 
 // 测试不同的 URL 格式
 const testUrls = [

@@ -1,6 +1,6 @@
 // 测试具体的模型是否可用
-const API_KEY = 'sk-bdpN20sgmgTUzx455kBflsKqZTdBfRyvDFgQo8QlLCgeCr3o';
-const BASE_URL = 'https://api.cursorai.art';
+const API_KEY = process.env.GEMINI_API_KEY || 'your-api-key-here';
+const BASE_URL = process.env.GEMINI_BASE_URL || 'https://api.cursorai.art';
 
 const modelsToTest = [
   'gemini-2.5-flash',
