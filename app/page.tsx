@@ -10,7 +10,8 @@ import {
   PaperAirplaneIcon,
   ShieldCheckIcon,
   ExclamationTriangleIcon,
-  CheckCircleIcon
+  CheckCircleIcon,
+  DocumentArrowDownIcon
 } from '@heroicons/react/24/outline';
 
 const App: React.FC = () => {
@@ -176,6 +177,46 @@ const App: React.FC = () => {
     }
   }, [questionCount, hasAutoAnalyzed, isAnalyzing, messages.length]);
 
+  // 下载问诊记录为 JSON 文件
+  const handleDownloadRecord = () => {
+    if (messages.length < 2) {
+      alert('对话内容太少，无法保存');
+      return;
+    }
+    
+    const record = {
+      id: `triage-${Date.now()}`,
+      createdAt: new Date().toISOString(),
+      messages: messages,
+      analysisResult: analysisResult,
+      summary: generateSummary()
+    };
+    
+    const blob = new Blob([JSON.stringify(record, null, 2)], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `问诊记录_${new Date().toLocaleDateString('zh-CN').replace(/\//g, '-')}_${Date.now()}.json`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  };
+
+  // 生成摘要
+  const generateSummary = () => {
+    const userMessages = messages.filter(m => m.role === 'user');
+    const chiefComplaint = userMessages[0]?.text || '未知';
+    let mainDiagnosis = '待分析';
+    
+    if (analysisResult?.diagnoses && analysisResult.diagnoses.length > 0) {
+      const top = analysisResult.diagnoses[0];
+      mainDiagnosis = `${top.name} (${top.probability}%)`;
+    }
+    
+    return `主诉: ${chiefComplaint.substring(0, 50)} | 诊断: ${mainDiagnosis}`;
+  };
+
   const handleKeyDown = (e: React.KeyboardEvent) => {
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault();
@@ -225,14 +266,25 @@ const App: React.FC = () => {
             <ShieldCheckIcon className="w-6 h-6" />
             <h1 className="font-bold text-lg tracking-wide">AI 智能分诊</h1>
           </div>
-          <button
-            onClick={handleReset}
-            className="flex items-center space-x-1 px-3 py-1.5 bg-blue-700/50 hover:bg-blue-500 rounded-lg text-xs font-medium transition-colors border border-blue-400/30"
-            title="清除当前会话"
-          >
-            <ArrowPathIcon className="w-3.5 h-3.5" />
-            <span>重新对话</span>
-          </button>
+          <div className="flex items-center space-x-2">
+            <button
+              onClick={handleDownloadRecord}
+              disabled={messages.length < 2}
+              className="flex items-center space-x-1 px-2 py-1.5 bg-blue-700/50 hover:bg-blue-500 rounded-lg text-xs font-medium transition-colors border border-blue-400/30 disabled:opacity-50 disabled:cursor-not-allowed"
+              title="下载问诊记录"
+            >
+              <DocumentArrowDownIcon className="w-3.5 h-3.5" />
+              <span>下载记录</span>
+            </button>
+            <button
+              onClick={handleReset}
+              className="flex items-center space-x-1 px-3 py-1.5 bg-blue-700/50 hover:bg-blue-500 rounded-lg text-xs font-medium transition-colors border border-blue-400/30"
+              title="清除当前会话"
+            >
+              <ArrowPathIcon className="w-3.5 h-3.5" />
+              <span>重新对话</span>
+            </button>
+          </div>
         </header>
 
         {/* Chat Messages */}
