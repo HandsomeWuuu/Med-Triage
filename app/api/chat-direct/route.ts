@@ -1,8 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { GoogleGenAI, Type, Schema } from "@google/genai";
 import { Message } from '@/types';
 
-// System instruction for the chat interaction
+// 使用直接 HTTP 请求的方式调用第三方 Gemini API
+// 适用于不完全兼容 @google/genai SDK 的第三方服务
+
 const CHAT_SYSTEM_INSTRUCTION = `
 You are an expert Medical Triage Nurse AI, communicating in Simplified Chinese (简体中文).
 Your goal is to interview the patient to understand their "Chief Complaint" (主诉).
@@ -16,28 +17,14 @@ CRITICAL RULES:
    - Always include "其他" (Other) or "无" (None).
 
 Tone: Professional, empathetic, efficient.
-`;
 
-// Schema for the chat response with options
-const CHAT_RESPONSE_SCHEMA: Schema = {
-  type: Type.OBJECT,
-  properties: {
-    question: { 
-      type: Type.STRING, 
-      description: "The follow-up question to the patient in Chinese." 
-    },
-    options: { 
-      type: Type.ARRAY, 
-      items: { type: Type.STRING },
-      description: "A list of 4-6 short, likely answers in Chinese for the user to click."
-    },
-    allowMultiple: { 
-      type: Type.BOOLEAN,
-      description: "True if the user can select multiple options, False for single choice."
-    }
-  },
-  required: ["question", "options", "allowMultiple"]
-};
+You must respond in JSON format with this structure:
+{
+  "question": "your question in Chinese",
+  "options": ["option1", "option2", "option3", "option4"],
+  "allowMultiple": true or false
+}
+`;
 
 export async function POST(request: NextRequest) {
   try {
@@ -53,16 +40,11 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    console.log('🔧 Using direct HTTP API:', {
-      baseUrl,
-      apiKeyPrefix: apiKey.substring(0, 15) + '...',
-    });
-
-    // 构建消息（添加系统指令作为第一条消息）
+    // 构建对话内容
     const messages = [
       {
         role: 'user',
-        parts: [{ text: CHAT_SYSTEM_INSTRUCTION + '\n\nYou MUST respond in valid JSON format.' }]
+        parts: [{ text: CHAT_SYSTEM_INSTRUCTION }]
       },
       ...history.map((msg: Message) => ({
         role: msg.role === 'model' ? 'model' : 'user',
@@ -74,10 +56,15 @@ export async function POST(request: NextRequest) {
       }
     ];
 
-    // 使用直接 HTTP 请求调用 API
+    console.log('🔧 Direct API call:', {
+      baseUrl,
+      apiKeyPrefix: apiKey.substring(0, 15) + '...',
+      messagesCount: messages.length
+    });
+
+    // 直接调用 REST API
     const apiUrl = `${baseUrl}/v1beta/models/gemini-2.5-flash:generateContent?key=${apiKey}`;
     
-    console.log('📤 Sending request...');
     const response = await fetch(apiUrl, {
       method: 'POST',
       headers: {
@@ -97,12 +84,12 @@ export async function POST(request: NextRequest) {
 
     if (!response.ok) {
       const errorText = await response.text();
-      console.error('❌ API Error Response:', errorText);
+      console.error('API Error Response:', errorText);
       throw new Error(`API Error: ${response.status} ${response.statusText}`);
     }
 
     const data = await response.json();
-    console.log('✅ Received response');
+    console.log('✅ API Response received');
 
     // 解析响应
     const text = data.candidates?.[0]?.content?.parts?.[0]?.text;
@@ -111,23 +98,14 @@ export async function POST(request: NextRequest) {
     }
 
     const parsed = JSON.parse(text);
-    console.log('📊 Parsed response:', JSON.stringify(parsed, null, 2));
-    
-    // 处理 options：如果是对象数组，提取文本字段
-    let options = parsed.options || [];
-    if (options.length > 0 && typeof options[0] === 'object') {
-      // 对象格式：{value, text} 或 {key, value}
-      options = options.map((opt: any) => opt.text || opt.value || String(opt));
-    }
-    
     return NextResponse.json({
       text: parsed.question,
-      options: options,
-      allowMultiple: parsed.allowMultiple || parsed.question_type === 'multiple_choice' || false
+      options: parsed.options || [],
+      allowMultiple: parsed.allowMultiple || false
     });
 
   } catch (error) {
-    console.error("❌ Error in chat:", error);
+    console.error("❌ Error in direct API chat:", error);
     
     if (error instanceof Error) {
       console.error('Error details:', {

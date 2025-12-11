@@ -55,47 +55,70 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // Initialize Gemini Client (在服务器端)
-    const ai = new GoogleGenAI({ apiKey });
-    const model = "gemini-2.5-flash";
+    // 使用直接 HTTP 请求（兼容第三方 API）
+    const baseUrl = process.env.GEMINI_BASE_URL || 'https://generativelanguage.googleapis.com';
+    
+    console.log('🔧 Analyze API using direct HTTP');
 
-    // Construct a prompt context from history
+    // 构建提示词
     const conversationText = history.map((m: Message) => `${m.role}: ${m.text}`).join('\n');
     const prompt = `
-      Based on the following patient interview transcript, generate a differential diagnosis and map symptoms to conditions.
-      Output ONLY valid JSON matching the schema.
-      IMPORTANT: All text fields (name, description, recommendedAction, symptom, condition) MUST be in Simplified Chinese (简体中文).
-      The 'urgency' field must remain one of the English enum values: "Low", "Medium", "High", "Critical".
-      
-      TRANSCRIPT:
-      ${conversationText}
-    `;
+Based on the following patient interview transcript, generate a differential diagnosis and map symptoms to conditions.
+Output ONLY valid JSON with this structure:
+{
+  "diagnoses": [{"name": "疾病名(中文)", "probability": 0-100, "description": "理由(中文)", "urgency": "Low|Medium|High|Critical", "recommendedAction": "建议(中文)"}],
+  "symptomConnections": [{"symptom": "症状(中文)", "condition": "疾病(中文)", "strength": 1-10}]
+}
 
-    const response = await ai.models.generateContent({
-      model,
-      contents: prompt,
-      config: {
-        responseMimeType: "application/json",
-        responseSchema: ANALYSIS_SCHEMA,
-        temperature: 0.2,
-      }
+TRANSCRIPT:
+${conversationText}
+`;
+
+    // 直接 HTTP 请求
+    const apiUrl = `${baseUrl}/v1beta/models/gemini-2.5-flash:generateContent?key=${apiKey}`;
+    
+    const response = await fetch(apiUrl, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        contents: [{
+          role: 'user',
+          parts: [{ text: prompt }]
+        }],
+        generationConfig: {
+          temperature: 0.2,
+          topK: 40,
+          topP: 0.95,
+          maxOutputTokens: 2048,
+          responseMimeType: 'application/json'
+        }
+      })
     });
 
-    const jsonText = response.text;
-    if (!jsonText) {
-      return NextResponse.json(
-        { error: 'No analysis result' },
-        { status: 500 }
-      );
+    if (!response.ok) {
+      const errorText = await response.text();
+      console.error('❌ API Error:', errorText);
+      throw new Error(`API Error: ${response.status}`);
     }
 
-    const result = JSON.parse(jsonText);
+    const data = await response.json();
+    const text = data.candidates?.[0]?.content?.parts?.[0]?.text;
+    
+    if (!text) {
+      throw new Error('No analysis result');
+    }
+
+    const result = JSON.parse(text);
+    console.log('✅ Analysis complete');
     return NextResponse.json(result);
 
   } catch (error) {
-    console.error("Error generating medical analysis:", error);
+    console.error("❌ Error in analyze:", error);
+    const errorMessage = error instanceof Error ? error.message : String(error);
     return NextResponse.json(
-      { error: "分析失败，请重试。" },
+      { error: `分析失败：${errorMessage}` },
       { status: 500 }
     );
   }
