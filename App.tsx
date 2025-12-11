@@ -1,0 +1,336 @@
+import React, { useState, useRef, useEffect } from 'react';
+import { Message, AnalysisResult } from './types';
+import { sendMessageToTriageBot, analyzeMedicalContext } from './services/geminiService';
+import SankeyChart from './components/SankeyChart';
+import DiagnosisPanel from './components/DiagnosisPanel';
+import { 
+  ChartBarIcon, 
+  ArrowPathIcon, 
+  PaperAirplaneIcon,
+  ShieldCheckIcon,
+  ExclamationTriangleIcon,
+  CheckCircleIcon
+} from '@heroicons/react/24/outline';
+
+const App: React.FC = () => {
+  // State
+  const [messages, setMessages] = useState<Message[]>([
+    {
+      id: '1',
+      role: 'model',
+      text: "您好，我是您的智能分诊助手。请简要描述您最主要的不舒服症状（例如：头痛、腹痛、发烧等）。",
+      timestamp: new Date(),
+      options: [],
+      allowMultiple: false
+    }
+  ]);
+  const [input, setInput] = useState('');
+  const [isTyping, setIsTyping] = useState(false);
+  const [isAnalyzing, setIsAnalyzing] = useState(false);
+  const [analysisResult, setAnalysisResult] = useState<AnalysisResult | null>(null);
+  const [selectedOptions, setSelectedOptions] = useState<Set<string>>(new Set());
+  
+  const messagesEndRef = useRef<HTMLDivElement>(null);
+
+  // Auto-scroll to bottom of chat
+  useEffect(() => {
+    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+  }, [messages, isTyping]); // Scroll when messages change or typing indicator appears
+
+  const handleReset = () => {
+    if (messages.length > 1 && !window.confirm("确定要清除当前对话并重新开始吗？")) {
+      return;
+    }
+    
+    setMessages([
+      {
+        id: '1',
+        role: 'model',
+        text: "您好，我是您的智能分诊助手。请简要描述您最主要的不舒服症状（例如：头痛、腹痛、发烧等）。",
+        timestamp: new Date(),
+        options: [],
+        allowMultiple: false
+      }
+    ]);
+    setInput('');
+    setIsTyping(false);
+    setIsAnalyzing(false);
+    setAnalysisResult(null);
+    setSelectedOptions(new Set());
+  };
+
+  const handleSendMessage = async (textOverride?: string) => {
+    const textToSend = textOverride || input.trim();
+    if (!textToSend || isTyping) return;
+
+    const userMsg: Message = {
+      id: Date.now().toString(),
+      role: 'user',
+      text: textToSend,
+      timestamp: new Date()
+    };
+
+    setMessages(prev => [...prev, userMsg]);
+    setInput('');
+    setSelectedOptions(new Set()); // Clear options
+    setIsTyping(true);
+
+    // Call Gemini for Chat
+    const response = await sendMessageToTriageBot(messages, userMsg.text);
+
+    const botMsg: Message = {
+      id: (Date.now() + 1).toString(),
+      role: 'model',
+      text: response.text,
+      options: response.options,
+      allowMultiple: response.allowMultiple,
+      timestamp: new Date()
+    };
+
+    setMessages(prev => {
+        // 防止在等待回复时重置导致旧消息追加到新会话中
+        if (prev.length === 1 && prev[0].id === '1' && prev[0].text.includes("您好")) {
+            return [...prev, botMsg]; 
+        }
+        return [...prev, botMsg];
+    });
+    setIsTyping(false);
+  };
+
+  const handleAnalyze = async () => {
+    if (messages.length < 2) return;
+    setIsAnalyzing(true);
+    const result = await analyzeMedicalContext(messages);
+    setAnalysisResult(result);
+    setIsAnalyzing(false);
+  };
+
+  const handleKeyDown = (e: React.KeyboardEvent) => {
+    if (e.key === 'Enter' && !e.shiftKey) {
+      e.preventDefault();
+      handleSendMessage();
+    }
+  };
+
+  // Option Handling
+  const toggleOption = (option: string, allowMultiple: boolean) => {
+    if (allowMultiple) {
+      const newSet = new Set(selectedOptions);
+      if (newSet.has(option)) {
+        newSet.delete(option);
+      } else {
+        newSet.add(option);
+      }
+      setSelectedOptions(newSet);
+    } else {
+      // Single select: Send immediately
+      handleSendMessage(option);
+    }
+  };
+
+  const submitMultiSelection = () => {
+    if (selectedOptions.size === 0) return;
+    const combinedText = Array.from(selectedOptions).join(', ');
+    handleSendMessage(combinedText);
+  };
+
+  return (
+    <div className="flex h-screen bg-slate-100 font-sans">
+      
+      {/* Sidebar / Left Panel - Chat */}
+      <div className="w-full md:w-1/3 flex flex-col border-r border-slate-200 bg-white shadow-lg z-10">
+        <header className="p-4 border-b border-blue-500 flex items-center justify-between bg-blue-600 text-white shadow-sm">
+          <div className="flex items-center space-x-2">
+            <ShieldCheckIcon className="w-6 h-6" />
+            <h1 className="font-bold text-lg tracking-wide">AI 智能分诊</h1>
+          </div>
+          <button
+            onClick={handleReset}
+            className="flex items-center space-x-1 px-3 py-1.5 bg-blue-700/50 hover:bg-blue-500 rounded-lg text-xs font-medium transition-colors border border-blue-400/30"
+            title="清除当前会话"
+          >
+            <ArrowPathIcon className="w-3.5 h-3.5" />
+            <span>重新对话</span>
+          </button>
+        </header>
+
+        {/* Chat Messages */}
+        <div className="flex-1 overflow-y-auto p-4 space-y-4 scrollbar-hide bg-slate-50">
+          {messages.map((msg, index) => {
+            const isLastMessage = index === messages.length - 1;
+            return (
+              <div key={msg.id} className="flex flex-col">
+                <div className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}>
+                  <div
+                    className={`max-w-[90%] rounded-2xl p-3 text-sm shadow-sm leading-relaxed ${
+                      msg.role === 'user'
+                        ? 'bg-blue-600 text-white rounded-br-none'
+                        : 'bg-white text-slate-800 border border-slate-200 rounded-bl-none'
+                    }`}
+                  >
+                    {msg.text}
+                  </div>
+                </div>
+
+                {/* Render Options if strictly the last message, from model, and options exist */}
+                {isLastMessage && msg.role === 'model' && msg.options && msg.options.length > 0 && (
+                  <div className="mt-3 ml-2 max-w-[90%]">
+                     <p className="text-xs text-slate-400 mb-2 pl-1 font-medium uppercase tracking-wider">
+                       {msg.allowMultiple ? '请选择所有符合的项：' : '请选择一项：'}
+                     </p>
+                     <div className="flex flex-wrap gap-2">
+                       {msg.options.map((option, i) => {
+                         const isSelected = selectedOptions.has(option);
+                         return (
+                           <button
+                             key={i}
+                             onClick={() => toggleOption(option, !!msg.allowMultiple)}
+                             className={`px-3 py-2 text-sm rounded-lg border transition-all duration-200 text-left ${
+                               isSelected
+                                 ? 'bg-blue-100 border-blue-400 text-blue-800 shadow-inner'
+                                 : 'bg-white border-slate-200 text-slate-700 hover:border-blue-300 hover:shadow-sm'
+                             }`}
+                           >
+                             <div className="flex items-center space-x-2">
+                               {msg.allowMultiple && (
+                                  <div className={`w-4 h-4 rounded border flex items-center justify-center ${isSelected ? 'bg-blue-500 border-blue-500' : 'border-slate-300'}`}>
+                                     {isSelected && <CheckCircleIcon className="w-3 h-3 text-white" />}
+                                  </div>
+                               )}
+                               <span>{option}</span>
+                             </div>
+                           </button>
+                         );
+                       })}
+                     </div>
+                     
+                     {/* Submit Button for Multi-Select */}
+                     {msg.allowMultiple && selectedOptions.size > 0 && (
+                       <div className="mt-3">
+                         <button
+                           onClick={submitMultiSelection}
+                           className="bg-blue-600 text-white text-sm px-4 py-2 rounded-lg hover:bg-blue-700 transition-colors shadow-sm flex items-center space-x-1"
+                         >
+                           <span>确认选择</span>
+                           <PaperAirplaneIcon className="w-3 h-3" />
+                         </button>
+                       </div>
+                     )}
+                  </div>
+                )}
+              </div>
+            );
+          })}
+          
+          {isTyping && (
+            <div className="flex justify-start">
+              <div className="bg-white border border-slate-200 rounded-2xl rounded-bl-none p-3 shadow-sm">
+                <div className="flex space-x-1">
+                  <div className="w-2 h-2 bg-slate-400 rounded-full animate-bounce"></div>
+                  <div className="w-2 h-2 bg-slate-400 rounded-full animate-bounce delay-75"></div>
+                  <div className="w-2 h-2 bg-slate-400 rounded-full animate-bounce delay-150"></div>
+                </div>
+              </div>
+            </div>
+          )}
+          <div ref={messagesEndRef} />
+        </div>
+
+        {/* Input Area */}
+        <div className="p-4 bg-white border-t border-slate-100">
+          <div className="relative">
+            <textarea
+              value={input}
+              onChange={(e) => setInput(e.target.value)}
+              onKeyDown={handleKeyDown}
+              placeholder="输入您的回答或从上方选择..."
+              className="w-full pl-4 pr-12 py-3 bg-slate-100 border-none rounded-xl focus:ring-2 focus:ring-blue-500 resize-none text-sm text-slate-800 placeholder-slate-400"
+              rows={2}
+            />
+            <button
+              onClick={() => handleSendMessage()}
+              disabled={!input.trim() || isTyping}
+              className="absolute right-2 bottom-2 p-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 transition-colors"
+            >
+              <PaperAirplaneIcon className="w-5 h-5" />
+            </button>
+          </div>
+          <p className="text-[10px] text-center text-slate-400 mt-2">
+            AI可能会犯错，仅供参考，不可替代专业医疗建议。
+          </p>
+        </div>
+      </div>
+
+      {/* Right Panel - Visualization & Diagnosis */}
+      <div className="hidden md:flex flex-col w-2/3 bg-slate-50 h-full overflow-hidden">
+        
+        {/* Top Header for Right Panel */}
+        <header className="h-16 px-6 bg-white border-b border-slate-200 flex items-center justify-between shrink-0">
+          <div className="flex items-center space-x-2 text-slate-700">
+            <ChartBarIcon className="w-5 h-5 text-blue-600" />
+            <span className="font-semibold">临床分析面板</span>
+          </div>
+          <button
+            onClick={handleAnalyze}
+            disabled={isAnalyzing || messages.length < 2}
+            className={`flex items-center space-x-2 px-4 py-2 rounded-lg font-medium text-sm transition-all ${
+              isAnalyzing 
+                ? 'bg-slate-100 text-slate-400 cursor-not-allowed'
+                : 'bg-emerald-600 text-white hover:bg-emerald-700 shadow-md hover:shadow-lg'
+            }`}
+          >
+            <ArrowPathIcon className={`w-4 h-4 ${isAnalyzing ? 'animate-spin' : ''}`} />
+            <span>{isAnalyzing ? '分析中...' : '更新分析'}</span>
+          </button>
+        </header>
+
+        {/* Content Grid */}
+        <div className="flex-1 p-6 overflow-hidden">
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 h-full">
+            
+            {/* Left Column of Dashboard: Differential Diagnosis List */}
+            <div className="flex flex-col h-full bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden">
+              <div className="p-4 border-b border-slate-100 bg-slate-50 flex items-center justify-between">
+                <h2 className="font-semibold text-slate-800">鉴别诊断</h2>
+                <span className="text-xs text-slate-500 bg-white px-2 py-1 rounded border">最匹配</span>
+              </div>
+              <div className="flex-1 overflow-hidden p-2">
+                 <DiagnosisPanel data={analysisResult} isLoading={isAnalyzing} />
+              </div>
+            </div>
+
+            {/* Right Column of Dashboard: Sankey Chart */}
+            <div className="flex flex-col h-full bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden">
+               <div className="p-4 border-b border-slate-100 bg-slate-50 flex items-center justify-between">
+                <h2 className="font-semibold text-slate-800">症状图谱</h2>
+                <div className="flex items-center space-x-4 text-xs">
+                    <div className="flex items-center space-x-1">
+                        <span className="w-2 h-2 rounded-full bg-blue-400"></span>
+                        <span className="text-slate-500">症状</span>
+                    </div>
+                    <div className="flex items-center space-x-1">
+                        <span className="w-2 h-2 rounded-full bg-red-400"></span>
+                        <span className="text-slate-500">疾病</span>
+                    </div>
+                </div>
+              </div>
+              <div className="flex-1 p-4">
+                 <SankeyChart data={analysisResult} />
+              </div>
+            </div>
+
+          </div>
+        </div>
+
+        {/* Footer Warning */}
+        <div className="p-3 bg-amber-50 border-t border-amber-100 flex items-center justify-center space-x-2 text-amber-700 text-xs shrink-0">
+          <ExclamationTriangleIcon className="w-4 h-4" />
+          <span>本工具仅用于演示，紧急情况请立即拨打急救电话。</span>
+        </div>
+      </div>
+
+    </div>
+  );
+};
+
+export default App;

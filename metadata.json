@@ -1,0 +1,5 @@
+{
+  "name": "Copy of AI Triage & Diagnosis Visualizer",
+  "description": "An intelligent hospital triage application that interviews patients, generates a differential diagnosis list, and visualizes symptom-disease relationships using a Sankey diagram.",
+  "requestFramePermissions": []
+}
