@@ -22,6 +22,8 @@ const App: React.FC = () => {
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [analysisResult, setAnalysisResult] = useState<AnalysisResult | null>(null);
   const [selectedOptions, setSelectedOptions] = useState<Set<string>>(new Set());
+  const [questionCount, setQuestionCount] = useState(0); // 追踪问题数量
+  const [hasAutoAnalyzed, setHasAutoAnalyzed] = useState(false); // 防止重复自动分析
   
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
@@ -65,6 +67,8 @@ const App: React.FC = () => {
     setIsAnalyzing(false);
     setAnalysisResult(null);
     setSelectedOptions(new Set());
+    setQuestionCount(0);
+    setHasAutoAnalyzed(false);
   };
 
   const handleSendMessage = async (textOverride?: string) => {
@@ -117,6 +121,9 @@ const App: React.FC = () => {
         }
         return [...prev, botMsg];
       });
+      
+      // 增加问题计数（每次AI回复一个问题）
+      setQuestionCount(prev => prev + 1);
     } catch (error) {
       console.error('Error sending message:', error);
       const errorMsg: Message = {
@@ -158,6 +165,16 @@ const App: React.FC = () => {
       setIsAnalyzing(false);
     }
   };
+
+  // 自动触发分析：当问题数量足够时
+  useEffect(() => {
+    // 当问题数达到4个且尚未自动分析时，触发分析
+    if (questionCount >= 4 && !hasAutoAnalyzed && !isAnalyzing && messages.length >= 2) {
+      console.log('🔄 Auto-triggering analysis after', questionCount, 'questions');
+      setHasAutoAnalyzed(true);
+      handleAnalyze();
+    }
+  }, [questionCount, hasAutoAnalyzed, isAnalyzing, messages.length]);
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
     if (e.key === 'Enter' && !e.shiftKey) {
@@ -330,6 +347,17 @@ const App: React.FC = () => {
           <div className="flex items-center space-x-2 text-slate-700">
             <ChartBarIcon className="w-5 h-5 text-blue-600" />
             <span className="font-semibold">临床分析面板</span>
+            {questionCount > 0 && questionCount < 4 && !hasAutoAnalyzed && (
+              <span className="ml-2 text-xs text-slate-400 bg-slate-100 px-2 py-1 rounded-full">
+                问诊进度: {questionCount}/4
+              </span>
+            )}
+            {hasAutoAnalyzed && (
+              <span className="ml-2 text-xs text-emerald-600 bg-emerald-50 px-2 py-1 rounded-full flex items-center">
+                <CheckCircleIcon className="w-3 h-3 mr-1" />
+                已完成初步分析
+              </span>
+            )}
           </div>
           <button
             onClick={handleAnalyze}

@@ -43,7 +43,8 @@ const SankeyChart: React.FC<SankeyChartProps> = ({ data }) => {
   // Custom Node Content
   const renderNode = (props: any) => {
     const { x, y, width, height, index, payload, containerWidth } = props;
-    const isOut = x + width + 6 > containerWidth / 2;
+    // 判断节点是在左侧还是右侧（症状在左，疾病在右）
+    const isRightSide = x > containerWidth / 3;
     
     // Distinct colors for Symptoms (Left) vs Conditions (Right)
     const isSymptom = !data.diagnoses.some(d => d.name === payload.name);
@@ -58,12 +59,14 @@ const SankeyChart: React.FC<SankeyChartProps> = ({ data }) => {
           height={height}
           fill={fill}
           fillOpacity="0.9"
+          rx={3}
+          ry={3}
         />
         <text
-          textAnchor={isOut ? 'end' : 'start'}
-          x={isOut ? x - 6 : x + width + 6}
+          textAnchor={isRightSide ? 'end' : 'start'}
+          x={isRightSide ? x - 8 : x + width + 8}
           y={y + height / 2}
-          fontSize="12"
+          fontSize="11"
           fontWeight="500"
           fill="#334155"
           dy="0.35em"
@@ -82,7 +85,7 @@ const SankeyChart: React.FC<SankeyChartProps> = ({ data }) => {
             node={renderNode}
             nodePadding={50}
             link={{ stroke: '#cbd5e1', fill: 'none' }}
-            margin={{ top: 20, right: 20, bottom: 20, left: 20 }}
+            margin={{ top: 20, right: 120, bottom: 20, left: 80 }}
             >
             <Tooltip content={({ payload }) => {
                 if (payload && payload.length > 0) {
