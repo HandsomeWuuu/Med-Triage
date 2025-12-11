@@ -91,7 +91,7 @@ ${conversationText}
           temperature: 0.2,
           topK: 40,
           topP: 0.95,
-          maxOutputTokens: 2048,
+          maxOutputTokens: 8192,  // 增加 token 限制避免截断
           responseMimeType: 'application/json'
         }
       })
@@ -110,8 +110,70 @@ ${conversationText}
       throw new Error('No analysis result');
     }
 
-    const result = JSON.parse(text);
-    console.log('✅ Analysis complete');
+    console.log('📄 Raw analysis response (length:', text.length, ')');
+    console.log('First 500 chars:', text.substring(0, 500));
+
+    // 智能清理和解析 JSON
+    let result;
+    try {
+      let cleanedText = text.trim();
+      
+      // 移除 markdown 代码块
+      if (cleanedText.startsWith('```json')) {
+        cleanedText = cleanedText.replace(/^```json\s*/i, '').replace(/\s*```$/, '');
+      } else if (cleanedText.startsWith('```')) {
+        cleanedText = cleanedText.replace(/^```\s*/, '').replace(/\s*```$/, '');
+      }
+      
+      // 移除控制字符
+      cleanedText = cleanedText
+        .replace(/[\u0000-\u0008\u000B-\u000C\u000E-\u001F\u007F-\u009F]/g, '')
+        .trim();
+      
+      // 检查并修复不完整的 JSON
+      const openBraces = (cleanedText.match(/{/g) || []).length;
+      const closeBraces = (cleanedText.match(/}/g) || []).length;
+      const openBrackets = (cleanedText.match(/\[/g) || []).length;
+      const closeBrackets = (cleanedText.match(/\]/g) || []).length;
+      
+      // 修复未终止的字符串
+      if (!cleanedText.endsWith('"') && !cleanedText.endsWith(']') && 
+          !cleanedText.endsWith('}') && !cleanedText.endsWith(',')) {
+        console.log('🔧 Fixing unterminated string in analysis');
+        cleanedText += '"';
+      }
+      
+      if (openBrackets > closeBrackets) {
+        console.log('🔧 Adding missing brackets:', openBrackets - closeBrackets);
+        cleanedText += ']'.repeat(openBrackets - closeBrackets);
+      }
+      
+      if (openBraces > closeBraces) {
+        console.log('🔧 Adding missing braces:', openBraces - closeBraces);
+        cleanedText += '}'.repeat(openBraces - closeBraces);
+      }
+      
+      result = JSON.parse(cleanedText);
+      console.log('✅ Analysis parsed successfully');
+      
+    } catch (parseError) {
+      console.error('❌ Analysis JSON parse error:', parseError);
+      console.error('Failed text:', text.substring(0, 800));
+      
+      // 紧急回退：返回基本结构
+      console.log('🚑 Using emergency fallback for analysis');
+      result = {
+        diagnoses: [{
+          name: "需要进一步检查",
+          probability: 50,
+          description: "症状信息不足，建议咨询医生",
+          urgency: "Medium",
+          recommendedAction: "请咨询医生进行专业评估"
+        }],
+        symptomConnections: []
+      };
+    }
+    
     return NextResponse.json(result);
 
   } catch (error) {
