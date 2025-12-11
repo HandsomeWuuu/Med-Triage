@@ -122,16 +122,41 @@ export async function POST(request: NextRequest) {
         statusText: response.statusText,
         error: errorText.substring(0, 500)
       });
+      
+      // 特殊处理 429 错误
+      if (response.status === 429) {
+        return NextResponse.json(
+          { 
+            error: 'API 请求过于频繁，请稍后再试',
+            hint: 'Rate limit exceeded. Please wait a moment and try again.'
+          },
+          { status: 429 }
+        );
+      }
+      
       throw new Error(`API Error: ${response.status} - ${errorText.substring(0, 100)}`);
     }
 
     const data = await response.json();
     console.log('✅ Received response');
+    console.log('📦 Response data structure:', {
+      hasCandidates: !!data.candidates,
+      candidatesLength: data.candidates?.length,
+      hasContent: !!data.candidates?.[0]?.content,
+      hasParts: !!data.candidates?.[0]?.content?.parts
+    });
 
     // 解析响应
     const text = data.candidates?.[0]?.content?.parts?.[0]?.text;
     if (!text) {
-      throw new Error('No text in response');
+      console.error('❌ Empty response from API:', JSON.stringify(data, null, 2).substring(0, 500));
+      
+      // 返回一个通用的跟进问题
+      return NextResponse.json({
+        text: '请详细描述您的症状？',
+        options: ['疼痛', '发热', '咳嗽', '其他'],
+        allowMultiple: true
+      });
     }
 
     // 记录完整的原始响应（用于调试）

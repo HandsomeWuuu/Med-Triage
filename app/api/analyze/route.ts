@@ -99,15 +99,50 @@ ${conversationText}
 
     if (!response.ok) {
       const errorText = await response.text();
-      console.error('❌ API Error:', errorText);
-      throw new Error(`API Error: ${response.status}`);
+      console.error('❌ API Error Response:', {
+        status: response.status,
+        statusText: response.statusText,
+        error: errorText.substring(0, 500)
+      });
+      
+      // 特殊处理 429 错误
+      if (response.status === 429) {
+        return NextResponse.json(
+          { 
+            error: 'API 请求过于频繁，请稍后再试',
+            hint: 'Rate limit exceeded. Please wait a moment and try again.'
+          },
+          { status: 429 }
+        );
+      }
+      
+      throw new Error(`API Error: ${response.status} - ${errorText.substring(0, 100)}`);
     }
 
     const data = await response.json();
+    console.log('📦 Response data structure:', {
+      hasCandidates: !!data.candidates,
+      candidatesLength: data.candidates?.length,
+      hasContent: !!data.candidates?.[0]?.content,
+      hasParts: !!data.candidates?.[0]?.content?.parts
+    });
+    
     const text = data.candidates?.[0]?.content?.parts?.[0]?.text;
     
     if (!text) {
-      throw new Error('No analysis result');
+      console.error('❌ Empty response from API:', JSON.stringify(data, null, 2).substring(0, 500));
+      
+      // 返回基本的分析结果
+      return NextResponse.json({
+        diagnoses: [{
+          name: "数据不足",
+          probability: 30,
+          description: "症状信息收集不完整，建议继续问诊或咨询医生",
+          urgency: "Medium",
+          recommendedAction: "建议咨询专业医生进行详细评估"
+        }],
+        symptomConnections: []
+      });
     }
 
     console.log('📄 Raw analysis response (length:', text.length, ')');
